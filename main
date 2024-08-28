@@ -1,0 +1,53 @@
+import pyodbc
+import pandas as pd
+import os
+
+# Database connection parameters
+server = 'code-split-server.database.windows.net'
+database = 'Split Code'
+username = 'codesplit'
+password = 'split@2024'
+driver = '{ODBC Driver 18 for SQL Server}'
+
+
+def get_connection():
+    conn_str = 'Driver={ODBC Driver 18 for SQL Server};Server=tcp:code-split-server.database.windows.net,1433;Database=Split Code;Uid=codesplit;Pwd={split@2024};Encrypt=yes;TrustServerCertificate=no;Connection Timeout=30;'
+    return pyodbc.connect(conn_str)
+
+
+def split_data_into_files(query, output_folder, max_file_size_mb=5):
+    conn = get_connection()
+    chunk_size = 100000  # Number of rows per chunk; adjust based on your dataset and memory constraints
+    offset = 0
+
+    # Ensure the output folder exists
+    os.makedirs(output_folder, exist_ok=True)
+    adf = pd.DataFrame()
+    file_counter = 1
+
+    while True:
+        # Fetch data in chunks
+        query_with_limit = f"{query} ORDER BY (SELECT NULL) OFFSET {offset} ROWS FETCH NEXT {chunk_size} ROWS ONLY"
+        df = pd.read_sql(query_with_limit, conn)
+        adf = pd.concat([df, adf])
+        if df.empty:
+            break
+
+        file_size = (df.memory_usage().sum())
+        print(file_size, len(df), len(adf), offset)
+        if file_size > max_file_size_mb * 1024 * 1024:
+            file_name = os.path.join(output_folder, f'part_{file_counter}.csv')
+            adf.to_csv(file_name, index=False)
+            print(f"Saved file_name")
+            file_counter += 1
+            adf = pd.DataFrame()
+
+        offset += chunk_size
+
+    conn.close()
+
+
+# Example usage
+query = 'SELECT * FROM "table"'
+output_folder = "output_files"
+split_data_into_files(query, output_folder)
